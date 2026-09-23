@@ -1,0 +1,95 @@
+<section class="page">
+  <a class="back-link" [routerLink]="isEdit() ? ['/entries', id()] : ['/entries']">← Cancel</a>
+
+  @if (loadError(); as error) {
+    @if (error.kind === 'notFound') {
+      <app-empty-state
+        icon="🔍"
+        title="Entry not found"
+        message="This entry doesn't exist or you don't have access to it."
+      >
+        <a class="btn btn--primary" routerLink="/entries">Go to my journal</a>
+      </app-empty-state>
+    } @else {
+      <app-alert [message]="error.message" retryLabel="Try again" (retry)="loadEntry(id()!)" />
+    }
+  } @else if (loading() && form.pristine && !form.controls.title.value) {
+    <app-spinner label="Loading entry…" />
+  } @else {
+    <form class="entry-form card form" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+      <h1 class="entry-form__title">{{ isEdit() ? 'Edit entry' : 'New entry' }}</h1>
+
+      @if (submitError(); as message) {
+        <app-alert [message]="message" />
+      }
+
+      <div class="field">
+        <div class="field__label-row">
+          <label class="field__label" for="entry-title">Title</label>
+          <span
+            class="field__counter"
+            [class.field__counter--over]="
+              form.controls.title.value.trim().length > rules.titleMaxLength
+            "
+          >
+            {{ form.controls.title.value.trim().length }}/{{ rules.titleMaxLength }}
+          </span>
+        </div>
+        <input
+          id="entry-title"
+          class="field__input"
+          type="text"
+          formControlName="title"
+          placeholder="What's on your mind?"
+          [attr.aria-invalid]="!!errorFor('title', 'Title')"
+          aria-describedby="entry-title-error"
+        />
+        @if (errorFor('title', 'Title'); as error) {
+          <p id="entry-title-error" class="field__error">{{ error }}</p>
+        }
+      </div>
+
+      <div class="field">
+        <span class="field__label" id="entry-mood-label"
+          >Mood <span class="field__optional">(optional)</span></span
+        >
+        <app-mood-picker formControlName="mood" labelledBy="entry-mood-label" />
+      </div>
+
+      <div class="field">
+        <div class="field__label-row">
+          <label class="field__label" for="entry-content">Content</label>
+          <span
+            class="field__counter"
+            [class.field__counter--over]="
+              form.controls.content.value.length > rules.contentMaxLength
+            "
+          >
+            {{ form.controls.content.value.length }}/{{ rules.contentMaxLength }}
+          </span>
+        </div>
+        <textarea
+          id="entry-content"
+          class="field__input field__textarea"
+          formControlName="content"
+          rows="10"
+          placeholder="Write about your day…"
+          [attr.aria-invalid]="!!errorFor('content', 'Content')"
+          aria-describedby="entry-content-error"
+        ></textarea>
+        @if (errorFor('content', 'Content'); as error) {
+          <p id="entry-content-error" class="field__error">{{ error }}</p>
+        }
+      </div>
+
+      <div class="entry-form__actions">
+        <a class="btn btn--secondary" [routerLink]="isEdit() ? ['/entries', id()] : ['/entries']">
+          Cancel
+        </a>
+        <button type="submit" class="btn btn--primary" [disabled]="submitting()">
+          {{ submitting() ? 'Saving…' : isEdit() ? 'Save changes' : 'Save entry' }}
+        </button>
+      </div>
+    </form>
+  }
+</section>

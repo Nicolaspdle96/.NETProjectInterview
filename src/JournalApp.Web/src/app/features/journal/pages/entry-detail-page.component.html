@@ -1,0 +1,55 @@
+<section class="page">
+  <a class="back-link" routerLink="/entries">← Back to journal</a>
+
+  @if (entry(); as entry) {
+    <article class="entry card" [attr.data-mood]="entry.mood" [attr.aria-busy]="loading()">
+      <header class="entry__header">
+        <div class="entry__meta">
+          <time [attr.datetime]="entry.createdAt.toISOString()">
+            {{ entry.createdAt | date: 'EEEE, MMMM d, y · HH:mm' }}
+          </time>
+          <app-mood-badge [mood]="entry.mood" />
+        </div>
+        <h1 class="entry__title">{{ entry.title }}</h1>
+        @if (entry.updatedAt; as updatedAt) {
+          <p class="entry__updated">Edited {{ updatedAt | date: 'MMM d, y · HH:mm' }}</p>
+        }
+      </header>
+
+      <div class="entry__content">{{ entry.content }}</div>
+
+      @if (deleteError(); as message) {
+        <app-alert [message]="message" />
+      }
+
+      <footer class="entry__actions">
+        <a class="btn btn--secondary" [routerLink]="['/entries', entry.id, 'edit']">Edit</a>
+        <button type="button" class="btn btn--danger-outline" (click)="askDelete()">Delete</button>
+      </footer>
+    </article>
+
+    <app-confirm-dialog
+      [open]="confirmOpen()"
+      [busy]="deleting()"
+      title="Delete this entry?"
+      [message]="'“' + entry.title + '” will be permanently deleted. This cannot be undone.'"
+      confirmLabel="Delete"
+      (confirmed)="confirmDelete()"
+      (cancelled)="cancelDelete()"
+    />
+  } @else if (loading()) {
+    <app-spinner label="Loading entry…" />
+  } @else if (error(); as error) {
+    @if (error.kind === 'notFound') {
+      <app-empty-state
+        icon="🔍"
+        title="Entry not found"
+        message="This entry doesn't exist or you don't have access to it."
+      >
+        <a class="btn btn--primary" routerLink="/entries">Go to my journal</a>
+      </app-empty-state>
+    } @else {
+      <app-alert [message]="error.message" retryLabel="Try again" (retry)="load()" />
+    }
+  }
+</section>
