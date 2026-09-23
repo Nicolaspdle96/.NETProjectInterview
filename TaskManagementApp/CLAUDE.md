@@ -25,9 +25,14 @@ This file guides Claude Code when working in this repository. Read it fully befo
 | Password hashing | `BCrypt.Net-Next` |
 | Validation | `FluentValidation` |
 | API docs | `Microsoft.AspNetCore.OpenApi` + `Scalar.AspNetCore` (UI at `/scalar`) |
-| Testing | xUnit, FluentAssertions (or Shouldly), `Microsoft.AspNetCore.Mvc.Testing` |
+| Testing | xUnit, **Shouldly** (chosen over FluentAssertions: v8+ requires a commercial license), `Microsoft.AspNetCore.Mvc.Testing` |
 
 Do **not** add MediatR, AutoMapper, or other heavy libraries unless explicitly asked. Use plain application services and manual mapping.
+
+Package notes:
+- `Microsoft.IdentityModel.JsonWebTokens` (token creation in Infrastructure) is pinned to the same version that `Microsoft.AspNetCore.Authentication.JwtBearer` brings in. Mixed `Microsoft.IdentityModel.*` versions fail at runtime; keep them aligned when upgrading.
+- Infrastructure has a `FrameworkReference` to `Microsoft.AspNetCore.App` (options binding/validation) instead of extra `Microsoft.Extensions.*` packages.
+- `FluentValidation.DependencyInjectionExtensions` registers all validators with `AddValidatorsFromAssembly`.
 
 ## Solution Structure (Clean Architecture)
 
@@ -109,6 +114,14 @@ JSON uses **snake_case** (`JsonNamingPolicy.SnakeCaseLower`) so fields match the
 
 `GET /api/tasks` query params: `status`, `due_before`, `due_after`, `page` (default 1), `page_size` (default 20, max 100), `sort` (`due_date`, `created_at`; prefix `-` for descending).
 
+Query semantics (implemented and tested; keep them stable):
+- `due_after` is inclusive, `due_before` is exclusive (`due_after <= due_date < due_before`). Tasks without a due date are excluded when either is given.
+- Default sort is `-created_at`. When sorting by `due_date`, tasks without one come **last in both directions**. Ties are broken by `Id` so pages are stable.
+- Invalid `sort`, unknown `status`, `due_after >= due_before`, or out-of-range paging return `400` (not clamped).
+- `status` is optional on POST (defaults to `Todo`) but required on PUT; the DTO property is nullable only so a missing value is reported instead of defaulting.
+- Client dates are normalized to UTC in Application (`DateTimeExtensions.AsUtc`): offsets are converted, zone-less values are taken as UTC. "Not in the past" compares UTC calendar days.
+- Query parameters are documented with `[Description]`, not XML `<param>` comments (those are matched by C# name and lost on renamed snake_case keys).
+
 Paged response shape:
 ```json
 { "items": [], "page": 1, "page_size": 20, "total_count": 0 }
@@ -147,6 +160,10 @@ Validation lives in Application (FluentValidation). Validation failures return `
 - Application services return a `Result`/`Result<T>` type for expected failures (not found, conflict, validation) instead of throwing. Exceptions are for unexpected failures only.
 - Status mapping: validation → 400, bad credentials → 401, not found → 404, duplicate email → 409, unhandled → 500 (no stack traces outside Development).
 - Login failures return a generic message; do not reveal whether the email exists.
+- `Result` → HTTP mapping lives in one place: `ApiControllerBase.Problem(Error)`. Validation keys are converted to snake_case there.
+- `UseStatusCodePages()` gives bodyless responses (JWT challenge 401, unknown route 404) a ProblemDetails body.
+- A duplicate email that slips past the existence check (concurrent registration) is caught by the unique index; `AppDbContext` translates it to `UniqueConstraintException`, which `AuthService` maps to 409.
+- MVC and the HTTP (ProblemDetails/OpenAPI) JSON options are configured by the same `ConfigureJson` in `Program.cs`; change both together. Only JSON media types are advertised (`StringOutputFormatter` and `text/json` removed; `application/*+json` must stay for `application/problem+json`).
 
 ## Authentication (JWT)
 - Symmetric key HMAC-SHA256.
@@ -179,13 +196,17 @@ dotnet test
 dotnet ef migrations add <Name> --project src/TaskManager.Infrastructure --startup-project src/TaskManager.Api
 dotnet ef database update --project src/TaskManager.Infrastructure --startup-project src/TaskManager.Api
 
-# Secrets (development)
-dotnet user-secrets init --project src/TaskManager.Api
-dotnet user-secrets set "Jwt:Key" "<at-least-32-char-random-string>" --project src/TaskManager.Api
+# Secrets (development) — UserSecretsId is already in TaskManager.Api.csproj
+dotnet user-secrets set "Jwt:Key" "$(openssl rand -base64 64)" --project src/TaskManager.Api
+# Windows PowerShell 5.1 has no static RandomNumberGenerator.GetBytes; use:
+#   $b = New-Object byte[] 64; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
 
-# Formatting
+# Formatting (must pass; files use CRLF per .editorconfig)
+dotnet format --verify-no-changes
 dotnet format
 ```
+
+Migrations go in `Persistence/Migrations` (pass `--output-dir Persistence/Migrations` to `migrations add`). That folder is marked `generated_code` in `.editorconfig`, so style rules don't apply to it.
 
 ## Coding Conventions
 - Nullable reference types enabled; treat warnings as errors in all projects (`<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`), configured in a root `Directory.Build.props`.
@@ -195,13 +216,23 @@ dotnet format
 - Controllers are thin: map request → call service → map `Result` to HTTP response.
 - Feature folders in Application: `Tasks/`, `Auth/` each holding DTOs, validators, service interface, and implementation.
 - No commented-out code, no `TODO` left without a matching note in this file.
+- Naming: private instance fields `_camelCase`; constants and `static readonly` fields `PascalCase` (enforced by `.editorconfig`).
+- `TaskStatus` clashes with `System.Threading.Tasks.TaskStatus` from implicit usings. Every project that uses it has `global using TaskStatus = TaskManager.Domain.Tasks.TaskStatus;` in `GlobalUsings.cs`; add it to any new project that needs the enum.
+- Domain methods take `DateTime utcNow` from the caller (Application passes `IDateTimeProvider.UtcNow`) and reject non-UTC dates.
 
 ## Testing Strategy
 - **Domain tests**: entity invariants and state changes.
 - **Application tests**: services with fake/in-memory repositories; validators.
-- **Integration tests**: `WebApplicationFactory<Program>` with SQLite in-memory (`DataSource=:memory:` with a shared open connection). Cover the full auth flow, every task endpoint, validation errors, and **cross-user isolation** (user B cannot read, update, or delete user A's task → 404).
+- **Integration tests**: `WebApplicationFactory<Program>` with in-memory SQLite. Cover the full auth flow, every task endpoint, validation errors, and **cross-user isolation** (user B cannot read, update, or delete user A's task → 404).
 - Add `public partial class Program;` at the end of `Program.cs` so tests can reference it.
 - All tests must pass before a task is considered complete.
+
+How the test setup actually works:
+- `TaskManagerApiFactory` points `ConnectionStrings:DefaultConnection` at a uniquely named shared-cache in-memory database (`DataSource=file:<guid>?mode=memory&cache=shared`) and keeps one connection open for its lifetime. This is equivalent to `:memory:` + shared connection without replacing EF service registrations. It runs in `Development`, so the real migrations are applied at startup. It sets a test `Jwt:Key` via `UseSetting`, which takes precedence over user-secrets.
+- There is no Infrastructure test project: repository tests (`Persistence/`, fresh in-memory SQLite per test with real migrations), JWT generator, hasher and token-validation tests live in `TaskManager.Api.IntegrationTests`. Infrastructure and Application expose internals to their test projects via `InternalsVisibleTo`.
+- `Model_HasNoChangesMissingFromMigrations` fails if the model changes without a new migration.
+- Application tests use hand-written fakes in `Fakes/Fakes.cs` (no mocking library). The fake task repository only records `TaskListCriteria`; filtering/sorting is verified against SQLite.
+- Use unique emails per test (`ApiClientExtensions.UniqueEmail()`); the factory's database is shared across a test class.
 
 ## Implementation Plan
 
@@ -215,6 +246,8 @@ Work through these milestones in order. Finish each (building and tests green) b
 6. **Cross-cutting**: ProblemDetails, global exception handler, snake_case JSON, OpenAPI + Scalar with JWT bearer security scheme.
 7. **Querying**: filtering, sorting, pagination on `GET /api/tasks`.
 8. **Tests & polish**: integration tests, README with setup steps and example requests (`.http` file in the Api project).
+
+Status: all eight milestones are complete. Deviations from the plan above: snake_case JSON was configured in milestone 4 (the auth contract depends on it), and pagination (`page`, `page_size`, paged envelope) shipped in milestone 5 so the list contract never changed; milestone 7 added filtering and sorting.
 
 ## Definition of Done
 - `dotnet build` produces zero warnings.
