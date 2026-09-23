@@ -11,6 +11,9 @@ export const authGuard: CanMatchFn = (_route, segments) => {
   return inject(Router).createUrlTree(['/login'], { queryParams: { returnUrl } });
 };
 
-/** Keeps signed-in users away from the login and register pages. */
-export const guestGuard: CanMatchFn = () =>
-  inject(AuthStore).isAuthenticated() ? inject(Router).createUrlTree(['/entries']) : true;
+/**
+ * Keeps signed-in users away from the login and register pages. It is attached to a
+ * `path: ''` route, so it runs for every URL: it must return `false` (not a redirect) so
+ * other routes can match; the `**` route sends signed-in users to /entries.
+ */
+export const guestGuard: CanMatchFn = () => !inject(AuthStore).isAuthenticated();

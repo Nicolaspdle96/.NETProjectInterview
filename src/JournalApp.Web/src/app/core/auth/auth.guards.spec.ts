@@ -35,12 +35,10 @@ describe('auth guards', () => {
     expect(run(authGuard)).toBe(true);
   });
 
-  it('guestGuard sends authenticated users to /entries', () => {
+  it('guestGuard does not match for authenticated users (so other routes can)', () => {
     isAuthenticated.set(true);
 
-    const result = run(guestGuard) as UrlTree;
-
-    expect(TestBed.inject(Router).serializeUrl(result)).toBe('/entries');
+    expect(run(guestGuard)).toBe(false);
   });
 
   it('guestGuard lets anonymous users in', () => {
