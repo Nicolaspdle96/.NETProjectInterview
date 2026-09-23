@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+using TaskManager.Application.Abstractions.Persistence;
 using TaskManager.Domain.Users;
 using TaskManager.Infrastructure.Persistence.Repositories;
 
@@ -64,12 +64,12 @@ public sealed class UserRepositoryTests : SqliteDatabase
     }
 
     [Fact]
-    public async Task Add_DuplicateEmail_IsRejectedByUniqueIndex()
+    public async Task Add_DuplicateEmail_IsRejectedByUniqueIndexAsUniqueConstraintException()
     {
         await SeedUserAsync("alice@example.com");
         await using var dbContext = CreateDbContext();
         new UserRepository(dbContext).Add(User.Create("ALICE@example.com", "hash", Now));
 
-        await Should.ThrowAsync<DbUpdateException>(() => dbContext.SaveChangesAsync());
+        await Should.ThrowAsync<UniqueConstraintException>(() => dbContext.SaveChangesAsync());
     }
 }

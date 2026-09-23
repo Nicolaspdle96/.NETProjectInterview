@@ -1,3 +1,26 @@
 @baseUrl = http://localhost:5185
 
+### Register
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "alice@example.com",
+  "password": "Passw0rd!"
+}
+
+### Login (copy access_token into @token below)
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "alice@example.com",
+  "password": "Passw0rd!"
+}
+
 ###
+@token = paste-access-token-here
+
+### Current user
+GET {{baseUrl}}/api/auth/me
+Authorization: Bearer {{token}}
