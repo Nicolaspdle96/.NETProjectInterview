@@ -67,6 +67,33 @@ public sealed class ApiDocumentationTests(TaskManagerApiFactory factory) : IClas
     }
 
     [Fact]
+    public async Task OpenApiDocument_AdvertisesOnlyJsonMediaTypes()
+    {
+        var paths = (await GetOpenApiDocumentAsync()).GetProperty("paths");
+
+        var mediaTypes = paths.EnumerateObject()
+            .SelectMany(path => path.Value.EnumerateObject())
+            .SelectMany(operation => operation.Value.GetProperty("responses").EnumerateObject())
+            .Where(response => response.Value.TryGetProperty("content", out _))
+            .SelectMany(response => response.Value.GetProperty("content").EnumerateObject().Select(media => media.Name))
+            .Distinct()
+            .ToList();
+
+        mediaTypes.ShouldNotBeEmpty();
+        mediaTypes.ShouldNotContain("text/plain");
+        mediaTypes.ShouldNotContain("text/json");
+    }
+
+    [Fact]
+    public async Task OpenApiDocument_NumericSchemasAreIntegersOnly()
+    {
+        var schemas = (await GetOpenApiDocumentAsync()).GetProperty("components").GetProperty("schemas");
+
+        schemas.GetProperty("PagedResponseOfTaskResponse").GetProperty("properties").GetProperty("total_count")
+            .GetProperty("type").GetString().ShouldBe("integer");
+    }
+
+    [Fact]
     public async Task ScalarUi_IsServed()
     {
         var response = await factory.CreateClient().GetAsync("/scalar");

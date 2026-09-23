@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Mvc.Formatters;
 using Scalar.AspNetCore;
 using TaskManager.Api.Authentication;
 using TaskManager.Api.ErrorHandling;
@@ -15,7 +16,16 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddJwtAuthentication();
 
 // MVC uses its own JSON options; ProblemDetails writing and OpenAPI schemas use the HTTP ones.
-builder.Services.AddControllers().AddJsonOptions(options => ConfigureJson(options.JsonSerializerOptions));
+builder.Services
+    .AddControllers(options =>
+    {
+        // JSON only: without this, OpenAPI advertises text/plain and text/json for every response.
+        // application/*+json stays because the JSON formatter needs it for application/problem+json.
+        options.OutputFormatters.RemoveType<StringOutputFormatter>();
+        options.OutputFormatters.OfType<SystemTextJsonOutputFormatter>().Single().SupportedMediaTypes.Remove("text/json");
+        options.InputFormatters.OfType<SystemTextJsonInputFormatter>().Single().SupportedMediaTypes.Remove("text/json");
+    })
+    .AddJsonOptions(options => ConfigureJson(options.JsonSerializerOptions));
 builder.Services.ConfigureHttpJsonOptions(options => ConfigureJson(options.SerializerOptions));
 
 builder.Services.AddProblemDetails(options =>
@@ -55,6 +65,7 @@ await app.RunAsync();
 static void ConfigureJson(JsonSerializerOptions options)
 {
     options.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;
+    options.NumberHandling = JsonNumberHandling.Strict;
     options.Converters.Add(new JsonStringEnumConverter());
 }
 
