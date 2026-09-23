@@ -22,7 +22,13 @@ public static class DependencyInjection
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IJournalEntryRepository, JournalEntryRepository>();
 
-        services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
+        services.AddOptions<JwtOptions>()
+            .Bind(configuration.GetSection(JwtOptions.SectionName))
+            .Validate(o => o.Key.Length >= 32, "Jwt:Key must be configured with at least 32 characters.")
+            .Validate(o => !string.IsNullOrWhiteSpace(o.Issuer) && !string.IsNullOrWhiteSpace(o.Audience),
+                "Jwt:Issuer and Jwt:Audience must be configured.")
+            .Validate(o => o.ExpiresMinutes > 0, "Jwt:ExpiresMinutes must be greater than zero.")
+            .ValidateOnStart();
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddSingleton<ITokenService, JwtTokenService>();
         services.AddSingleton(TimeProvider.System);
