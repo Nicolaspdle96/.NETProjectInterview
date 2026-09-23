@@ -25,8 +25,7 @@ public sealed class JournalApiFactory : WebApplicationFactory<Program>, IAsyncLi
         var serverConnectionString = Environment.GetEnvironmentVariable(ExternalServerVariable);
         if (string.IsNullOrWhiteSpace(serverConnectionString))
         {
-            _container = new MsSqlBuilder()
-                .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
+            _container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest")
                 .Build();
             await _container.StartAsync();
             serverConnectionString = _container.GetConnectionString();
