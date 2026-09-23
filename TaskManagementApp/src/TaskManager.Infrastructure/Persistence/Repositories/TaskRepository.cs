@@ -15,13 +15,22 @@ internal sealed class TaskRepository(AppDbContext dbContext) : ITaskRepository
         dbContext.Tasks
             .SingleOrDefaultAsync(task => task.Id == id && task.UserId == userId, cancellationToken);
 
-    public async Task<IReadOnlyList<TaskItem>> ListByUserAsync(Guid userId, CancellationToken cancellationToken) =>
-        await dbContext.Tasks
+    public async Task<TaskPage> ListAsync(TaskListCriteria criteria, CancellationToken cancellationToken)
+    {
+        var query = dbContext.Tasks
             .AsNoTracking()
-            .Where(task => task.UserId == userId)
+            .Where(task => task.UserId == criteria.UserId);
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var items = await query
             .OrderByDescending(task => task.CreatedAt)
             .ThenByDescending(task => task.Id)
+            .Skip(criteria.Skip)
+            .Take(criteria.PageSize)
             .ToListAsync(cancellationToken);
+
+        return new TaskPage(items, totalCount);
+    }
 
     public void Add(TaskItem task) => dbContext.Tasks.Add(task);
 

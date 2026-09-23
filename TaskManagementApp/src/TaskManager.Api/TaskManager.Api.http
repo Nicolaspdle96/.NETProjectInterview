@@ -24,3 +24,42 @@ Content-Type: application/json
 ### Current user
 GET {{baseUrl}}/api/auth/me
 Authorization: Bearer {{token}}
+
+### List tasks (paged)
+GET {{baseUrl}}/api/tasks?page=1&page_size=20
+Authorization: Bearer {{token}}
+
+### Create task
+POST {{baseUrl}}/api/tasks
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "title": "Write quarterly report",
+  "description": "Include Q3 numbers",
+  "status": "Todo",
+  "due_date": "2099-10-01T00:00:00Z"
+}
+
+###
+@taskId = paste-task-id-here
+
+### Get task
+GET {{baseUrl}}/api/tasks/{{taskId}}
+Authorization: Bearer {{token}}
+
+### Update task (status is required)
+PUT {{baseUrl}}/api/tasks/{{taskId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "title": "Write quarterly report",
+  "description": "Sent to finance",
+  "status": "Done",
+  "due_date": null
+}
+
+### Delete task
+DELETE {{baseUrl}}/api/tasks/{{taskId}}
+Authorization: Bearer {{token}}

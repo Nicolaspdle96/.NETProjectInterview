@@ -1,6 +1,7 @@
 using TaskManager.Application.Abstractions;
 using TaskManager.Application.Abstractions.Authentication;
 using TaskManager.Application.Abstractions.Persistence;
+using TaskManager.Domain.Tasks;
 using TaskManager.Domain.Users;
 
 namespace TaskManager.Application.Tests.Fakes;
@@ -19,6 +20,32 @@ internal sealed class InMemoryUserRepository : IUserRepository
         Task.FromResult(Users.Any(user => user.Email == normalizedEmail));
 
     public void Add(User user) => Users.Add(user);
+}
+
+/// <summary>Mirrors the real repository's ownership scoping so service tests can rely on it.</summary>
+internal sealed class InMemoryTaskRepository : ITaskRepository
+{
+    public List<TaskItem> Tasks { get; } = [];
+
+    public Task<TaskItem?> GetByIdAsync(Guid id, Guid userId, CancellationToken cancellationToken) =>
+        Task.FromResult(Tasks.SingleOrDefault(task => task.Id == id && task.UserId == userId));
+
+    public Task<TaskItem?> GetForUpdateAsync(Guid id, Guid userId, CancellationToken cancellationToken) =>
+        GetByIdAsync(id, userId, cancellationToken);
+
+    public Task<TaskPage> ListAsync(TaskListCriteria criteria, CancellationToken cancellationToken)
+    {
+        var owned = Tasks
+            .Where(task => task.UserId == criteria.UserId)
+            .OrderByDescending(task => task.CreatedAt)
+            .ToList();
+
+        return Task.FromResult(new TaskPage(owned.Skip(criteria.Skip).Take(criteria.PageSize).ToList(), owned.Count));
+    }
+
+    public void Add(TaskItem task) => Tasks.Add(task);
+
+    public void Remove(TaskItem task) => Tasks.Remove(task);
 }
 
 internal sealed class FakeUnitOfWork : IUnitOfWork

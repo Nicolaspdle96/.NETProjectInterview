@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using TaskManager.Application.Abstractions.Persistence;
 using TaskManager.Domain.Tasks;
 using TaskManager.Domain.Users;
 using TaskManager.Infrastructure.Persistence.Repositories;
@@ -102,7 +103,7 @@ public sealed class TaskRepositoryTests : SqliteDatabase
     }
 
     [Fact]
-    public async Task ListByUserAsync_ReturnsOnlyOwnTasksNewestFirst()
+    public async Task ListAsync_ReturnsOnlyOwnTasksNewestFirst()
     {
         var user = await SeedUserAsync("owner@example.com");
         var other = await SeedUserAsync("other@example.com");
@@ -112,9 +113,27 @@ public sealed class TaskRepositoryTests : SqliteDatabase
         await SeedTaskAsync(other.Id, "Not mine", Now.AddHours(3));
         await using var dbContext = CreateDbContext();
 
-        var tasks = await new TaskRepository(dbContext).ListByUserAsync(user.Id, CancellationToken.None);
+        var page = await new TaskRepository(dbContext).ListAsync(new TaskListCriteria(user.Id, 1, 10), CancellationToken.None);
 
-        tasks.Select(task => task.Title).ShouldBe(["Newest", "Middle", "Oldest"]);
+        page.Items.Select(task => task.Title).ShouldBe(["Newest", "Middle", "Oldest"]);
+        page.TotalCount.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task ListAsync_SecondPage_SkipsFirstPageAndReportsTotal()
+    {
+        var user = await SeedUserAsync("owner@example.com");
+        for (var i = 0; i < 5; i++)
+        {
+            await SeedTaskAsync(user.Id, $"Task {i}", Now.AddMinutes(i));
+        }
+
+        await using var dbContext = CreateDbContext();
+
+        var page = await new TaskRepository(dbContext).ListAsync(new TaskListCriteria(user.Id, 2, 2), CancellationToken.None);
+
+        page.Items.Select(task => task.Title).ShouldBe(["Task 2", "Task 1"]);
+        page.TotalCount.ShouldBe(5);
     }
 
     [Fact]
