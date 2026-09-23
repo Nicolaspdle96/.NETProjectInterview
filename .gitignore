@@ -485,5 +485,3 @@ $RECYCLE.BIN/
 src/JournalApp.Api/wwwroot/*
 !src/JournalApp.Api/wwwroot/.gitkeep
 
-# Local secrets
-.env

@@ -1,45 +1,21 @@
 using JournalApp.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
-using Testcontainers.MsSql;
 
 namespace JournalApp.Infrastructure.Tests.Fixtures;
 
 /// <summary>
-/// Starts one ephemeral SQL Server container for the whole test collection. Each test class
-/// gets its own database so tests don't interfere with each other.
-/// Set JOURNALAPP_TEST_SQLSERVER to an existing server's connection string (e.g. LocalDB)
-/// to run the suite without Docker.
+/// Points the tests at a real SQL Server (LocalDB by default). Each test class gets its own
+/// database so tests don't interfere with each other.
+/// Set JOURNALAPP_TEST_SQLSERVER to another server's connection string to override it.
 /// </summary>
-public sealed class SqlServerFixture : IAsyncLifetime
+public sealed class SqlServerFixture
 {
-    public const string ExternalServerVariable = "JOURNALAPP_TEST_SQLSERVER";
+    public const string ServerVariable = "JOURNALAPP_TEST_SQLSERVER";
+    public const string DefaultServer = @"Server=(localdb)\MSSQLLocalDB;Integrated Security=True;TrustServerCertificate=True";
 
-    private MsSqlContainer? _container;
-    private string _serverConnectionString = string.Empty;
-
-    public async Task InitializeAsync()
-    {
-        var external = Environment.GetEnvironmentVariable(ExternalServerVariable);
-        if (!string.IsNullOrWhiteSpace(external))
-        {
-            _serverConnectionString = external;
-            return;
-        }
-
-        _container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest")
-            .Build();
-        await _container.StartAsync();
-        _serverConnectionString = _container.GetConnectionString();
-    }
-
-    public async Task DisposeAsync()
-    {
-        if (_container is not null)
-        {
-            await _container.DisposeAsync();
-        }
-    }
+    private readonly string _serverConnectionString =
+        Environment.GetEnvironmentVariable(ServerVariable) is { Length: > 0 } configured ? configured : DefaultServer;
 
     public string CreateDatabaseConnectionString(string prefix)
     {

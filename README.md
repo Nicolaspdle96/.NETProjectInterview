@@ -8,24 +8,20 @@ A personal journal web app. Registered users write entries (title, content, opti
 
 ## Quick start
 
-Prerequisites: .NET 10 SDK, Node.js 22.12+ (or 24+) with npm, and either Docker **or** SQL Server LocalDB (Windows).
+Prerequisites: Windows with SQL Server LocalDB (installed with Visual Studio, or on its own via the SQL Server Express installer), the .NET 10 SDK, and Node.js 22.12+ (or 24+) with npm.
 
 ```bash
-# 1. Database (Docker). Skip this if you use LocalDB, see below.
-cp .env.example .env
-docker compose up -d
-
-# 2. Build the UI into src/JournalApp.Api/wwwroot
+# 1. Build the UI into src/JournalApp.Api/wwwroot
 cd src/JournalApp.Web
 npm install
 npm run build
 cd ../..
 
-# 3. Run API + UI
+# 2. Run API + UI
 dotnet run --project src/JournalApp.Api
 ```
 
-Open **http://localhost:5192**. In Development the app applies migrations and loads demo data automatically, so you don't need to run `dotnet ef`.
+Open **http://localhost:5192**. The app connects to LocalDB (`(localdb)\MSSQLLocalDB`), which starts automatically on first connection. In Development it creates the `JournalApp` database, applies migrations and loads demo data, so you don't need to run `dotnet ef`.
 
 | User | Email | Password | Entries |
 |---|---|---|---|
@@ -34,18 +30,12 @@ Open **http://localhost:5192**. In Development the app applies migrations and lo
 
 Swagger UI: http://localhost:5192/swagger. Log in with `POST /api/auth/login`, click **Authorize**, and paste the token.
 
-### Using LocalDB instead of Docker (Windows)
+### Using a different SQL Server instance
 
-Change `ConnectionStrings:DefaultConnection` in `src/JournalApp.Api/appsettings.Development.json` to:
-
-```
-Server=(localdb)\\MSSQLLocalDB;Database=JournalApp;Trusted_Connection=True;TrustServerCertificate=True
-```
-
-Or keep the file unchanged and override the setting with an environment variable:
+The connection string is `ConnectionStrings:DefaultConnection` in `src/JournalApp.Api/appsettings.Development.json`. To point at another instance without editing the file, set an environment variable:
 
 ```powershell
-$env:ConnectionStrings__DefaultConnection = 'Server=(localdb)\MSSQLLocalDB;Database=JournalApp;Trusted_Connection=True;TrustServerCertificate=True'
+$env:ConnectionStrings__DefaultConnection = 'Server=.\SQLEXPRESS;Database=JournalApp;Trusted_Connection=True;TrustServerCertificate=True'
 dotnet run --project src/JournalApp.Api
 ```
 
@@ -72,10 +62,10 @@ cd src/JournalApp.Web && npm test        # Angular unit tests (Vitest, the CLI d
 | `Infrastructure.Tests` | Repositories against real SQL Server: unique email/username indexes, cascade delete, mood stored as text, seeder, password hasher, JWT claims |
 | `Api.Tests` | `WebApplicationFactory` integration tests: status codes, 401 without a token, 404 on another user's entries, register → login → CRUD flow, unknown `/api/*` routes return 404 (not the SPA) |
 
-`Infrastructure.Tests` and `Api.Tests` use **Testcontainers**, so **Docker must be running**. Each suite starts its own ephemeral SQL Server. To run them without Docker, point them at an existing server; each test class creates and drops its own database:
+`Infrastructure.Tests` and `Api.Tests` run against real SQL Server on **LocalDB** by default. Each test class (and the API test host) creates its own throwaway database with a random name, migrates it, and drops it afterwards, so the tests never touch the `JournalApp` development database. To run them on another instance, set `JOURNALAPP_TEST_SQLSERVER` to a server connection string without a database name:
 
 ```powershell
-$env:JOURNALAPP_TEST_SQLSERVER = 'Server=(localdb)\MSSQLLocalDB;Integrated Security=True;TrustServerCertificate=True'
+$env:JOURNALAPP_TEST_SQLSERVER = 'Server=.\SQLEXPRESS;Integrated Security=True;TrustServerCertificate=True'
 dotnet test
 ```
 
@@ -121,17 +111,16 @@ Components never use `HttpClient` directly. `app.config.ts` binds each domain re
 
 | Setting | Where |
 |---|---|
-| `ConnectionStrings:DefaultConnection` | `appsettings.Development.json` (points to the Docker container) |
+| `ConnectionStrings:DefaultConnection` | `appsettings.Development.json` (LocalDB with Windows authentication, so there is no password to store) |
 | `Jwt:Issuer`, `Jwt:Audience`, `Jwt:ExpiresMinutes` | `appsettings.json` |
 | `Jwt:Key` | Demo key in `appsettings.Development.json` only. The app refuses to start if the key is missing or shorter than 32 characters. |
-| `SA_PASSWORD` (Docker) | `.env` (gitignored), created from `.env.example`. Must match the connection string. |
 
-The Development values are demo credentials. **Outside Development, provide `Jwt:Key` and the connection string through user secrets or environment variables** (for example `Jwt__Key`, `ConnectionStrings__DefaultConnection`). Never commit them.
+The Development JWT key is a demo value. **Outside Development, provide `Jwt:Key` and the connection string through user secrets or environment variables** (for example `Jwt__Key`, `ConnectionStrings__DefaultConnection`). Never commit them.
 
 ## Useful commands
 
 ```bash
-docker compose up -d                        # SQL Server on localhost:1433
+sqllocaldb info MSSQLLocalDB                # check the LocalDB instance
 dotnet ef migrations add <Name> -p src/JournalApp.Infrastructure -s src/JournalApp.Api -o Persistence/Migrations
 cd src/JournalApp.Web && npm run build      # writes to ../JournalApp.Api/wwwroot
 ```

@@ -26,7 +26,7 @@ Technical exercise: a personal journal web app with a **.NET (C#)** backend foll
 - Entity Framework Core + SQL Server (`Microsoft.EntityFrameworkCore.SqlServer`)
 - JWT Bearer authentication
 - FluentValidation for validation in the Application layer
-- Tests: xUnit, Moq, FluentAssertions, `Microsoft.AspNetCore.Mvc.Testing` for API tests, `Testcontainers.MsSql` for Infrastructure and integration tests against a real SQL Server in Docker
+- Tests: xUnit, Moq, FluentAssertions, `Microsoft.AspNetCore.Mvc.Testing` for API tests; Infrastructure and integration tests run against a real SQL Server (LocalDB)
 
 **Frontend**
 - Angular (latest stable version), standalone components, signals
@@ -180,17 +180,13 @@ Application/
 
 ### 4.6 SQL Server database
 
-Two ways to run SQL Server in development are supported:
+Development uses **SQL Server LocalDB** (Windows; ships with Visual Studio or the SQL Server Express installer). Docker is not used.
 
-- **Windows**: SQL Server LocalDB (ships with Visual Studio).
-  `Server=(localdb)\\MSSQLLocalDB;Database=JournalApp;Trusted_Connection=True;TrustServerCertificate=True`
-- **Any OS (recommended for the reviewer)**: a Docker container defined in `docker-compose.yml` at the repo root, using the `mcr.microsoft.com/mssql/server:2022-latest` image on port 1433.
-  `Server=localhost,1433;Database=JournalApp;User Id=sa;Password=<SA_PASSWORD>;TrustServerCertificate=True`
+`Server=(localdb)\\MSSQLLocalDB;Database=JournalApp;Trusted_Connection=True;TrustServerCertificate=True`
 
-- The default connection string in `appsettings.Development.json` points to the Docker container; the README explains how to switch it to LocalDB.
-- The development `sa` password is defined in a `.env` file (with a versioned `.env.example`) and meets SQL Server's complexity policy.
+- This is the connection string in `appsettings.Development.json`. It uses Windows authentication, so there is no database password to manage. The README explains how to override it with `ConnectionStrings__DefaultConnection` to use another instance.
 - Migrations are applied automatically on startup in Development (`Database.MigrateAsync()`), so the reviewer doesn't need to run `dotnet ef`.
-- Tests use `Testcontainers.MsSql`: each suite spins up its own ephemeral SQL Server, so they require Docker to be running. Do not use EF Core's InMemory provider, since it doesn't enforce real unique indexes or constraints.
+- Infrastructure and API tests run against LocalDB: each test class (and the API test host) creates a throwaway database with a unique name, migrates it and drops it afterwards. The `JOURNALAPP_TEST_SQLSERVER` environment variable can point the tests at another server. Do not use EF Core's InMemory provider, since it doesn't enforce real unique indexes or constraints.
 
 ### 4.7 Serving Angular from wwwroot
 
@@ -292,7 +288,7 @@ When implementing any backend feature:
 Expected coverage:
 - **Domain.Tests**: entity invariants (valid and invalid creation and updates).
 - **Application.Tests**: services with mocked repositories; validators; entry ownership rule.
-- **Infrastructure.Tests**: repositories against a real SQL Server via Testcontainers (including verifying the unique indexes on email and username); hasher and token generation.
+- **Infrastructure.Tests**: repositories against a real SQL Server on LocalDB (including verifying the unique indexes on email and username); hasher and token generation.
 - **Api.Tests**: integration tests with `WebApplicationFactory` — status codes, 401 without a token, 404 when accessing another user's entries, full register → login → CRUD flow.
 
 Test naming: `Method_Scenario_ExpectedResult` (e.g. `CreateAsync_EmptyTitle_ThrowsValidationException`). Arrange / Act / Assert structure.
@@ -311,8 +307,8 @@ Test naming: `Method_Scenario_ExpectedResult` (e.g. `CreateAsync_EmptyTitle_Thro
 ## 8. Commands
 
 ```bash
-# Database (Docker)
-docker compose up -d          # starts SQL Server on localhost:1433
+# Database (LocalDB starts automatically on first connection)
+sqllocaldb info MSSQLLocalDB  # check the LocalDB instance
 
 # Backend
 dotnet restore
