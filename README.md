@@ -58,9 +58,9 @@ cd src/JournalApp.Web && npm test        # Angular unit tests (Vitest, the CLI d
 | Suite | What it covers |
 |---|---|
 | `Domain.Tests` | Entity invariants: title/content limits, trimming, mood validity, email normalization, username length |
-| `Application.Tests` | Auth and entry services with mocked repositories, validators, the ownership rule (another user's entry → not found) |
-| `Infrastructure.Tests` | Repositories against real SQL Server: unique email/username indexes, cascade delete, mood stored as text, seeder, password hasher, JWT claims |
-| `Api.Tests` | `WebApplicationFactory` integration tests: status codes, 401 without a token, 404 on another user's entries, register → login → CRUD flow, unknown `/api/*` routes return 404 (not the SPA) |
+| `Application.Tests` | Auth and entry services with mocked repositories, validators, the ownership rule (another user's entry → not found), caching decorators |
+| `Infrastructure.Tests` | Repositories against real SQL Server: unique email/username indexes, cascade delete, mood stored as text, seeder, password hasher, JWT claims, in-memory cache |
+| `Api.Tests` | `WebApplicationFactory` integration tests: status codes, 401 without a token, 404 on another user's entries, register → login → CRUD flow, no stale reads after writes, unknown `/api/*` routes return 404 (not the SPA) |
 
 `Infrastructure.Tests` and `Api.Tests` run against real SQL Server on **LocalDB** by default. Each test class (and the API test host) creates its own throwaway database with a random name, migrates it, and drops it afterwards, so the tests never touch the `JournalApp` development database. To run them on another instance, set `JOURNALAPP_TEST_SQLSERVER` to a server connection string without a database name:
 
@@ -82,8 +82,8 @@ Api ──► Application ──► Domain
 | Project | Responsibility |
 |---|---|
 | `JournalApp.Domain` | `User`, `JournalEntry`, `Mood`, domain exceptions. Private setters and factory/update methods that enforce invariants. No dependencies. |
-| `JournalApp.Application` | Use cases (`AuthService`, `JournalEntryService`), DTOs, FluentValidation validators, manual mapping, the interfaces Infrastructure implements. |
-| `JournalApp.Infrastructure` | `AppDbContext` + configurations + migrations, repositories, `UnitOfWork` (turns unique-index violations into 409), `PasswordHasher<User>` adapter, `JwtTokenService`, `DbSeeder`. |
+| `JournalApp.Application` | Use cases (`AuthService`, `JournalEntryService`) and their caching decorators, DTOs, FluentValidation validators, manual mapping, the interfaces Infrastructure implements. |
+| `JournalApp.Infrastructure` | `AppDbContext` + configurations + migrations, repositories, `UnitOfWork` (turns unique-index violations into 409), `PasswordHasher<User>` adapter, `JwtTokenService`, `MemoryCacheService`, `DbSeeder`. |
 | `JournalApp.Api` | Composition root: thin controllers, exception → `ProblemDetails` middleware, JWT bearer auth, Swagger, static files + SPA fallback. |
 | `JournalApp.Web` | Angular app, see below. |
 
@@ -94,6 +94,31 @@ Main decisions:
 - **Emails** are stored trimmed and lowercased, which makes the unique index case-insensitive regardless of collation.
 - **`Content`** is `nvarchar(max)`, because SQL Server's `nvarchar(n)` tops out at 4000 characters. The 5000-character limit is enforced by the domain and the validators.
 - **Error responses** are `ProblemDetails`. Validation errors come as `errors` keyed by camelCase field name, which the UI shows next to each field.
+- **Cache layer:** reads are cached so repeated requests don't hit the database (see below).
+
+### Cache layer
+
+```
+Controller ──► CachedJournalEntryService ──(miss)──► JournalEntryService ──► Repository ──► SQL Server
+                       │
+                       └──(hit)──► ICacheService (MemoryCacheService)
+```
+
+Controllers talk to caching decorators (`CachedJournalEntryService`, `CachedAuthService`) that wrap the real Application services:
+
+| Request | Cached? | Key |
+|---|---|---|
+| `GET /api/entries` | Yes | per user |
+| `GET /api/entries/{id}` | Yes | per user and entry |
+| `GET /api/auth/me` | Yes | per user |
+| `POST`/`PUT`/`DELETE` on `/api/entries` | No; invalidates that user's cached entries | — |
+| `POST /api/auth/register`, `POST /api/auth/login` | No | — |
+
+- **Safe with the ownership rule:** every key includes the user id, and the inner service still does the ownership check on a miss, so one user can never be served another user's cached entry. Errors such as 404 are never cached.
+- **No stale reads:** each user's entry keys include a version token. Any create, update or delete by that user drops the token, so all their cached lists and entries are bypassed at once. The API tests check that reads right after each kind of write return fresh data.
+- **Only DTOs are cached**, never EF entities, so change tracking isn't affected.
+- **Bounded:** entries expire after `Cache:ExpirationSeconds` (default 300) and the cache holds at most `Cache:SizeLimit` items (default 10000). Hits and misses are logged at `Debug` level (category `JournalApp.Infrastructure.Caching`).
+- **Single process:** the cache is in memory, which fits this single-process deployment. Running several instances would need a distributed `ICacheService` implementation (for example Redis); the decorators wouldn't change.
 
 ### Frontend layers (`src/JournalApp.Web/src/app`)
 
@@ -114,6 +139,7 @@ Components never use `HttpClient` directly. `app.config.ts` binds each domain re
 | `ConnectionStrings:DefaultConnection` | `appsettings.Development.json` (LocalDB with Windows authentication, so there is no password to store) |
 | `Jwt:Issuer`, `Jwt:Audience`, `Jwt:ExpiresMinutes` | `appsettings.json` |
 | `Jwt:Key` | Demo key in `appsettings.Development.json` only. The app refuses to start if the key is missing or shorter than 32 characters. |
+| `Cache:ExpirationSeconds`, `Cache:SizeLimit` | `appsettings.json` (defaults 300 and 10000; both must be greater than zero) |
 
 The Development JWT key is a demo value. **Outside Development, provide `Jwt:Key` and the connection string through user secrets or environment variables** (for example `Jwt__Key`, `ConnectionStrings__DefaultConnection`). Never commit them.
 

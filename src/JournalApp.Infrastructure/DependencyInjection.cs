@@ -1,4 +1,5 @@
 using JournalApp.Application.Common.Interfaces;
+using JournalApp.Infrastructure.Caching;
 using JournalApp.Infrastructure.Persistence;
 using JournalApp.Infrastructure.Persistence.Repositories;
 using JournalApp.Infrastructure.Security;
@@ -32,6 +33,13 @@ public static class DependencyInjection
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddSingleton<ITokenService, JwtTokenService>();
         services.AddSingleton(TimeProvider.System);
+
+        services.AddOptions<CacheOptions>()
+            .Bind(configuration.GetSection(CacheOptions.SectionName))
+            .Validate(o => o.ExpirationSeconds > 0, "Cache:ExpirationSeconds must be greater than zero.")
+            .Validate(o => o.SizeLimit > 0, "Cache:SizeLimit must be greater than zero.")
+            .ValidateOnStart();
+        services.AddSingleton<ICacheService, MemoryCacheService>();
 
         return services;
     }

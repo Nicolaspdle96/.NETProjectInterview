@@ -26,6 +26,7 @@ Technical exercise: a personal journal web app with a **.NET (C#)** backend foll
 - Entity Framework Core + SQL Server (`Microsoft.EntityFrameworkCore.SqlServer`)
 - JWT Bearer authentication
 - FluentValidation for validation in the Application layer
+- In-process caching with `Microsoft.Extensions.Caching.Memory` (already brought in by EF Core; no extra package)
 - Tests: xUnit, Moq, FluentAssertions, `Microsoft.AspNetCore.Mvc.Testing` for API tests; Infrastructure and integration tests run against a real SQL Server (LocalDB)
 
 **Frontend**
@@ -46,7 +47,7 @@ JournalApp/
 ├── src/
 │   ├── JournalApp.Domain/            # Entities, enums, domain exceptions. No dependencies.
 │   ├── JournalApp.Application/       # Use cases, DTOs, interfaces, validators. Depends only on Domain.
-│   ├── JournalApp.Infrastructure/    # EF Core, repositories, JWT, hashing, seed. Implements Application interfaces.
+│   ├── JournalApp.Infrastructure/    # EF Core, repositories, JWT, hashing, cache, seed. Implements Application interfaces.
 │   ├── JournalApp.Api/               # Controllers, middleware, DI, Program.cs. Serves wwwroot.
 │   │   └── wwwroot/                  # OUTPUT of the Angular build (do not edit by hand, gitignored)
 │   └── JournalApp.Web/               # Angular source code
@@ -66,7 +67,7 @@ Api ──► Application ──► Domain
 ```
 
 - `Domain` does not reference any other project or infrastructure package.
-- `Application` references only `Domain`. It defines interfaces (`IJournalEntryRepository`, `IUserRepository`, `IPasswordHasher`, `ITokenService`, `ICurrentUserService`, `IUnitOfWork`) but **does not** implement them.
+- `Application` references only `Domain`. It defines interfaces (`IJournalEntryRepository`, `IUserRepository`, `IPasswordHasher`, `ITokenService`, `ICurrentUserService`, `IUnitOfWork`, `ICacheService`) but **does not** implement them.
 - `Infrastructure` implements those interfaces. It's the only project that knows about EF Core.
 - `Api` is the composition root: it registers dependencies and exposes endpoints. Controllers contain no business logic; they only delegate to Application services.
 
@@ -126,21 +127,44 @@ Organized by feature:
 ```
 Application/
 ├── Common/
-│   ├── Interfaces/        # IUserRepository, IJournalEntryRepository, IPasswordHasher, ITokenService, ICurrentUserService, IUnitOfWork
+│   ├── Interfaces/        # IUserRepository, IJournalEntryRepository, IPasswordHasher, ITokenService, ICurrentUserService, IUnitOfWork, ICacheService
+│   ├── Caching/           # CacheKeys
 │   └── Exceptions/
 ├── Auth/
 │   ├── Dtos/              # RegisterRequest, LoginRequest, AuthResponse, UserDto
 │   ├── Validators/
-│   └── AuthService.cs     # IAuthService
+│   ├── AuthService.cs     # IAuthService
+│   └── CachedAuthService.cs          # caching decorator
 └── Entries/
     ├── Dtos/              # CreateEntryRequest, UpdateEntryRequest, EntryDto
     ├── Validators/
-    └── JournalEntryService.cs  # IJournalEntryService
+    ├── JournalEntryService.cs        # IJournalEntryService
+    └── CachedJournalEntryService.cs  # caching decorator
 ```
 
 - Services receive and return DTOs, never entities.
 - Entity ↔ DTO mapping is manual (extension methods), no AutoMapper.
 - All methods are `async` and accept a `CancellationToken`.
+
+### 4.3.1 Cache layer
+
+Controllers call the Application services through **caching decorators**, which sit between the controllers and the database:
+
+```
+Controller ──► CachedJournalEntryService ──(miss)──► JournalEntryService ──► Repository ──► SQL Server
+                       │
+                       └──(hit)──► ICacheService
+```
+
+- `AddApplication()` registers `IJournalEntryService` → `CachedJournalEntryService(JournalEntryService)` and `IAuthService` → `CachedAuthService(AuthService)`. Controllers are unaware of the cache.
+- Decorators contain **no business rules**: validation and the ownership check stay in the inner services. A decorator only decides whether to read from the cache, delegate, or invalidate.
+- Cache **DTOs only**, never EF entities: DTOs are immutable records that are safe to share between requests, while cached entities would break EF change tracking.
+- **Every key includes the user id** (`CacheKeys`), so a cached value can only be served to the user it was read for. Exceptions (for example `NotFoundException`) are never cached.
+- What is cached: `GET /api/entries` (list per user), `GET /api/entries/{id}` (per user and entry) and `GET /api/auth/me`. Register and login always go to the database.
+- **Invalidation:** entry keys include a per-user version token (`entries:{userId}:version`). Any create, update or delete by that user removes the token, which makes all of that user's cached entry reads unreachable at once. The invalidation runs in a `finally` block, so it happens even when the write fails.
+- Entries also expire after `Cache:ExpirationSeconds` (default 300), and the cache holds at most `Cache:SizeLimit` items (default 10000).
+- When adding a new read use case, cache it in the decorator with a user-scoped key. When adding a new write use case, invalidate the affected keys in the decorator. Cover both with decorator unit tests and an API test proving the next read isn't stale.
+- The cache lives in memory in the single API process. Scaling out to several instances would require a distributed `ICacheService` implementation; nothing else would change.
 
 ### 4.4 Infrastructure
 
@@ -152,6 +176,7 @@ Application/
 - Password hashing with ASP.NET Core Identity's `PasswordHasher<User>` (only the hasher, not full Identity).
 - `JwtTokenService` generates tokens with `sub` (user id), `email`, and `unique_name` claims.
 - `DbSeeder` runs on startup in Development: applies migrations and creates demo data if the database is empty.
+- `MemoryCacheService` implements `ICacheService` with its own `MemoryCache` instance (a singleton, separate from any shared `IMemoryCache`), configured by `CacheOptions` (`Cache:ExpirationSeconds`, `Cache:SizeLimit`, validated on startup). It logs cache hits and misses at `Debug` level.
 
 ### 4.5 API
 
@@ -287,9 +312,9 @@ When implementing any backend feature:
 
 Expected coverage:
 - **Domain.Tests**: entity invariants (valid and invalid creation and updates).
-- **Application.Tests**: services with mocked repositories; validators; entry ownership rule.
-- **Infrastructure.Tests**: repositories against a real SQL Server on LocalDB (including verifying the unique indexes on email and username); hasher and token generation.
-- **Api.Tests**: integration tests with `WebApplicationFactory` — status codes, 401 without a token, 404 when accessing another user's entries, full register → login → CRUD flow.
+- **Application.Tests**: services with mocked repositories; validators; entry ownership rule; caching decorators (reads hit the inner service once, per-user keys, failures not cached, writes invalidate).
+- **Infrastructure.Tests**: repositories against a real SQL Server on LocalDB (including verifying the unique indexes on email and username); hasher and token generation; `MemoryCacheService` (hit, miss, remove, expiration).
+- **Api.Tests**: integration tests with `WebApplicationFactory` — status codes, 401 without a token, 404 when accessing another user's entries, full register → login → CRUD flow, no stale reads after create/update/delete.
 
 Test naming: `Method_Scenario_ExpectedResult` (e.g. `CreateAsync_EmptyTitle_ThrowsValidationException`). Arrange / Act / Assert structure.
 
