@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TaskManager.Application.Common;
@@ -10,15 +11,21 @@ namespace TaskManager.Api.Controllers;
 [ProducesResponseType(StatusCodes.Status401Unauthorized)]
 public sealed class TasksController(ITaskService taskService) : ApiControllerBase
 {
+    // [Description] rather than XML <param> docs: those are matched by C# name and get lost on renamed query keys.
     [HttpGet]
     [ProducesResponseType<PagedResponse<TaskResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> List(
-        [FromQuery] int page = ListTasksRequest.DefaultPage,
-        [FromQuery(Name = "page_size")] int pageSize = ListTasksRequest.DefaultPageSize,
+        [FromQuery, Description("Only tasks with this status.")] TaskStatus? status,
+        [FromQuery(Name = "due_after"), Description("Only tasks due at or after this instant (inclusive).")] DateTime? dueAfter,
+        [FromQuery(Name = "due_before"), Description("Only tasks due before this instant (exclusive).")] DateTime? dueBefore,
+        [FromQuery, Description("created_at, -created_at (default), due_date or -due_date. Tasks without a due date sort last.")] string? sort,
+        [FromQuery, Description("1-based page number.")] int page = ListTasksRequest.DefaultPage,
+        [FromQuery(Name = "page_size"), Description("Items per page, 1 to 100.")] int pageSize = ListTasksRequest.DefaultPageSize,
         CancellationToken cancellationToken = default)
     {
-        var result = await taskService.ListAsync(new ListTasksRequest(page, pageSize), cancellationToken);
+        var request = new ListTasksRequest(page, pageSize, status, dueAfter, dueBefore, sort);
+        var result = await taskService.ListAsync(request, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : Problem(result.Error);
     }
 

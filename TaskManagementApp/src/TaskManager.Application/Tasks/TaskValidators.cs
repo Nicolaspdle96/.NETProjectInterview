@@ -37,6 +37,16 @@ public sealed class ListTasksRequestValidator : AbstractValidator<ListTasksReque
     {
         RuleFor(request => request.Page).GreaterThanOrEqualTo(1);
         RuleFor(request => request.PageSize).InclusiveBetween(1, ListTasksRequest.MaxPageSize);
+        RuleFor(request => request.Status).IsInEnum();
+
+        RuleFor(request => request.Sort)
+            .Must(sort => TaskSort.TryParse(sort, out _))
+            .WithMessage($"'Sort' must be one of: {TaskSort.AllowedValues}.");
+
+        RuleFor(request => request.DueAfter)
+            .Must((request, dueAfter) => dueAfter.AsUtc() < request.DueBefore.AsUtc())
+            .When(request => request.DueAfter.HasValue && request.DueBefore.HasValue)
+            .WithMessage("'Due After' must be earlier than 'Due Before'.");
     }
 }
 

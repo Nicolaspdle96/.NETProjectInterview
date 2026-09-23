@@ -8,7 +8,16 @@ public sealed record CreateTaskRequest(string Title, string? Description, TaskSt
 /// <param name="Status">Required: nullable only so that a missing value is reported instead of silently becoming <c>Todo</c>.</param>
 public sealed record UpdateTaskRequest(string Title, string? Description, TaskStatus? Status, DateTime? DueDate);
 
-public sealed record ListTasksRequest(int Page = ListTasksRequest.DefaultPage, int PageSize = ListTasksRequest.DefaultPageSize)
+/// <param name="DueAfter">Inclusive lower bound on the due date.</param>
+/// <param name="DueBefore">Exclusive upper bound on the due date.</param>
+/// <param name="Sort">One of <see cref="TaskSort.AllowedValues"/>; defaults to <c>-created_at</c>.</param>
+public sealed record ListTasksRequest(
+    int Page = ListTasksRequest.DefaultPage,
+    int PageSize = ListTasksRequest.DefaultPageSize,
+    TaskStatus? Status = null,
+    DateTime? DueAfter = null,
+    DateTime? DueBefore = null,
+    string? Sort = null)
 {
     public const int DefaultPage = 1;
     public const int DefaultPageSize = 20;

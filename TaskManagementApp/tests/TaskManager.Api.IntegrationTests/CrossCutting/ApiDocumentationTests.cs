@@ -54,6 +54,19 @@ public sealed class ApiDocumentationTests(TaskManagerApiFactory factory) : IClas
     }
 
     [Fact]
+    public async Task OpenApiDocument_DescribesTaskListQueryParameters()
+    {
+        var parameters = (await GetOpenApiDocumentAsync())
+            .GetProperty("paths").GetProperty("/api/tasks").GetProperty("get").GetProperty("parameters")
+            .EnumerateArray()
+            .ToDictionary(parameter => parameter.GetProperty("name").GetString()!);
+
+        parameters.Keys.ShouldBe(["status", "due_after", "due_before", "sort", "page", "page_size"], ignoreOrder: true);
+        parameters["due_before"].GetProperty("description").GetString()!.ShouldContain("exclusive");
+        parameters["sort"].GetProperty("description").GetString()!.ShouldContain("-due_date");
+    }
+
+    [Fact]
     public async Task ScalarUi_IsServed()
     {
         var response = await factory.CreateClient().GetAsync("/scalar");

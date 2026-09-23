@@ -115,4 +115,50 @@ public sealed class TaskValidatorTests
     {
         _listValidator.Validate(new ListTasksRequest(page, pageSize)).IsValid.ShouldBeTrue();
     }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("created_at")]
+    [InlineData("-created_at")]
+    [InlineData("due_date")]
+    [InlineData("-DUE_DATE")]
+    public void List_SupportedSort_Passes(string? sort)
+    {
+        _listValidator.Validate(new ListTasksRequest(Sort: sort)).IsValid.ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData("title")]
+    [InlineData("--due_date")]
+    [InlineData("-")]
+    [InlineData("due_date,created_at")]
+    public void List_UnsupportedSort_Fails(string sort)
+    {
+        _listValidator.Validate(new ListTasksRequest(Sort: sort)).Errors.ShouldContain(e => e.PropertyName == "Sort");
+    }
+
+    [Fact]
+    public void List_UndefinedStatus_Fails()
+    {
+        _listValidator.Validate(new ListTasksRequest(Status: (TaskStatus)9)).Errors.ShouldContain(e => e.PropertyName == "Status");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void List_DueAfterNotEarlierThanDueBefore_Fails(int daysAfterStart)
+    {
+        var request = new ListTasksRequest(DueAfter: Now.AddDays(daysAfterStart), DueBefore: Now);
+
+        _listValidator.Validate(request).Errors.ShouldContain(e => e.PropertyName == "DueAfter");
+    }
+
+    [Fact]
+    public void List_DueRangeInOrderOrOpenEnded_Passes()
+    {
+        _listValidator.Validate(new ListTasksRequest(DueAfter: Now, DueBefore: Now.AddDays(1))).IsValid.ShouldBeTrue();
+        _listValidator.Validate(new ListTasksRequest(DueAfter: Now)).IsValid.ShouldBeTrue();
+        _listValidator.Validate(new ListTasksRequest(DueBefore: Now)).IsValid.ShouldBeTrue();
+    }
 }

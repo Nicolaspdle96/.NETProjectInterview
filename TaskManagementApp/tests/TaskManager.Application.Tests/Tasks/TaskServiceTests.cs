@@ -1,3 +1,4 @@
+using TaskManager.Application.Abstractions.Persistence;
 using TaskManager.Application.Auth;
 using TaskManager.Application.Common.Results;
 using TaskManager.Application.Tasks;
@@ -195,6 +196,47 @@ public sealed class TaskServiceTests
         result.Value.Page.ShouldBe(1);
         result.Value.PageSize.ShouldBe(1);
         result.Value.TotalCount.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task ListAsync_WithFiltersAndSort_PassesNormalizedCriteriaForCurrentUser()
+    {
+        var dueAfter = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Unspecified);
+        var dueBefore = new DateTimeOffset(2026, 10, 8, 2, 0, 0, TimeSpan.FromHours(2)).LocalDateTime;
+
+        await _sut.ListAsync(
+            new ListTasksRequest(Page: 3, PageSize: 5, Status: TaskStatus.Done, DueAfter: dueAfter, DueBefore: dueBefore, Sort: "due_date"),
+            CancellationToken.None);
+
+        _tasks.LastCriteria.ShouldBe(new TaskListCriteria(
+            OwnerId,
+            Page: 3,
+            PageSize: 5,
+            Status: TaskStatus.Done,
+            DueAfter: new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc),
+            DueBefore: new DateTime(2026, 10, 8, 0, 0, 0, DateTimeKind.Utc),
+            SortBy: TaskSortField.DueDate,
+            Descending: false));
+        _tasks.LastCriteria!.DueAfter!.Value.Kind.ShouldBe(DateTimeKind.Utc);
+        _tasks.LastCriteria.DueBefore!.Value.Kind.ShouldBe(DateTimeKind.Utc);
+    }
+
+    [Fact]
+    public async Task ListAsync_NoSort_DefaultsToNewestCreatedFirst()
+    {
+        await _sut.ListAsync(new ListTasksRequest(), CancellationToken.None);
+
+        _tasks.LastCriteria!.SortBy.ShouldBe(TaskSortField.CreatedAt);
+        _tasks.LastCriteria.Descending.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task ListAsync_InvalidSort_ReturnsValidationErrorWithoutQuerying()
+    {
+        var result = await _sut.ListAsync(new ListTasksRequest(Sort: "title"), CancellationToken.None);
+
+        result.Error!.ValidationErrors!.Keys.ShouldContain("Sort");
+        _tasks.LastCriteria.ShouldBeNull();
     }
 
     [Fact]

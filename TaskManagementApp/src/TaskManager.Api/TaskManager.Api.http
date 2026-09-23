@@ -29,6 +29,10 @@ Authorization: Bearer {{token}}
 GET {{baseUrl}}/api/tasks?page=1&page_size=20
 Authorization: Bearer {{token}}
 
+### List tasks: filter and sort (due_after inclusive, due_before exclusive; undated tasks sort last)
+GET {{baseUrl}}/api/tasks?status=Todo&due_after=2099-01-01T00:00:00Z&due_before=2099-12-31T00:00:00Z&sort=due_date&page=1&page_size=20
+Authorization: Bearer {{token}}
+
 ### Create task
 POST {{baseUrl}}/api/tasks
 Authorization: Bearer {{token}}

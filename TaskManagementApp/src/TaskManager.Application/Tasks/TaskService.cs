@@ -32,7 +32,18 @@ internal sealed class TaskService(
             return validation.ToError();
         }
 
-        var page = await tasks.ListAsync(new TaskListCriteria(userId, request.Page, request.PageSize), cancellationToken);
+        TaskSort.TryParse(request.Sort, out var sort);
+        var criteria = new TaskListCriteria(
+            userId,
+            request.Page,
+            request.PageSize,
+            request.Status,
+            request.DueAfter.AsUtc(),
+            request.DueBefore.AsUtc(),
+            sort.Field,
+            sort.Descending);
+
+        var page = await tasks.ListAsync(criteria, cancellationToken);
 
         return new PagedResponse<TaskResponse>(
             page.Items.Select(task => task.ToResponse()).ToList(),

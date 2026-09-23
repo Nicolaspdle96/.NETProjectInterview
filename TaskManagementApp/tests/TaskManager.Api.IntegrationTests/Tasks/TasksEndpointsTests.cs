@@ -173,6 +173,45 @@ public sealed class TasksEndpointsTests(TaskManagerApiFactory factory) : IClassF
     }
 
     [Fact]
+    public async Task List_WithStatusDueRangeAndSort_AppliesAllQueryParameters()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+        async Task Create(string title, string status, string? dueDate) =>
+            (await client.PostAsJsonAsync("/api/tasks", new { title, status, due_date = dueDate })).EnsureSuccessStatusCode();
+
+        await Create("Todo early", "Todo", "2099-01-10T00:00:00Z");
+        await Create("Todo late", "Todo", "2099-03-01T00:00:00Z");
+        await Create("Todo mid", "Todo", "2099-02-01T00:00:00Z");
+        await Create("Todo undated", "Todo", null);
+        await Create("Done mid", "Done", "2099-02-01T00:00:00Z");
+
+        var ranged = await (await client.GetAsync(
+                "/api/tasks?status=Todo&due_after=2099-01-10T00:00:00Z&due_before=2099-03-01T00:00:00Z&sort=-due_date"))
+            .ReadAsAsync<PagedResponse<TaskResponse>>();
+        var byDueDate = await (await client.GetAsync("/api/tasks?status=todo&sort=due_date"))
+            .ReadAsAsync<PagedResponse<TaskResponse>>();
+
+        ranged.Items.Select(task => task.Title).ShouldBe(["Todo mid", "Todo early"]);
+        ranged.TotalCount.ShouldBe(2);
+        byDueDate.Items.Select(task => task.Title).ShouldBe(["Todo early", "Todo mid", "Todo late", "Todo undated"]);
+    }
+
+    [Theory]
+    [InlineData("sort=title", "sort")]
+    [InlineData("status=Archived", "status")]
+    [InlineData("due_after=2099-02-01&due_before=2099-01-01", "due_after")]
+    [InlineData("due_before=not-a-date", "due_before")]
+    public async Task List_InvalidQueryParameter_Returns400NamingTheParameter(string query, string expectedKey)
+    {
+        var client = await CreateAuthenticatedClientAsync();
+
+        var response = await client.GetAsync($"/api/tasks?{query}");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await response.ReadAsAsync<ValidationProblemDetails>()).Errors.Keys.ShouldContain(expectedKey);
+    }
+
+    [Fact]
     public async Task OtherUser_CannotReadUpdateOrDeleteTask_Gets404AndTaskIsUntouched()
     {
         var owner = await CreateAuthenticatedClientAsync();

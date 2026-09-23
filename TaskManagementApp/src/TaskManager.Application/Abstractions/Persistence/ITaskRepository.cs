@@ -14,7 +14,10 @@ public interface ITaskRepository
     /// <summary>Tracked lookup for tasks that will be modified or removed.</summary>
     Task<TaskItem?> GetForUpdateAsync(Guid id, Guid userId, CancellationToken cancellationToken);
 
-    /// <summary>Read-only page of the user's tasks, newest first.</summary>
+    /// <summary>
+    /// Read-only, filtered and sorted page of the user's tasks. When sorting by due date,
+    /// tasks without one come last in either direction; ties are broken by id.
+    /// </summary>
     Task<TaskPage> ListAsync(TaskListCriteria criteria, CancellationToken cancellationToken);
 
     void Add(TaskItem task);

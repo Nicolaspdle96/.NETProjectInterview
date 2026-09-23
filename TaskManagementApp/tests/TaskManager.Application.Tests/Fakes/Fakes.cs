@@ -33,8 +33,12 @@ internal sealed class InMemoryTaskRepository : ITaskRepository
     public Task<TaskItem?> GetForUpdateAsync(Guid id, Guid userId, CancellationToken cancellationToken) =>
         GetByIdAsync(id, userId, cancellationToken);
 
+    /// <summary>Filtering and sorting are the real repository's job (covered by SQLite tests); this only records the request.</summary>
+    public TaskListCriteria? LastCriteria { get; private set; }
+
     public Task<TaskPage> ListAsync(TaskListCriteria criteria, CancellationToken cancellationToken)
     {
+        LastCriteria = criteria;
         var owned = Tasks
             .Where(task => task.UserId == criteria.UserId)
             .OrderByDescending(task => task.CreatedAt)
